@@ -11,8 +11,49 @@ import re
 
 load_dotenv()
 
-st.set_page_config(page_title="Universal Talent Dashboard", layout="wide")
-st.title("📂 Universal Talent Dashboard")
+st.set_page_config(page_title="🌟 Talent Intelligence Hub", page_icon="📊", layout="wide")
+
+# Custom Styling
+st.markdown("""
+    <style>
+    .main {
+        background-color: #f4f8fb;
+    }
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+    .css-18e3th9 {
+        padding: 1rem 2rem 2rem 2rem;
+        border-radius: 12px;
+        background-color: #ffffff;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    }
+    .stButton>button {
+        background-color: #0066cc;
+        color: white;
+        border-radius: 5px;
+        font-weight: 600;
+    }
+    .stDownloadButton>button {
+        background-color: #10b981;
+        color: white;
+        border-radius: 5px;
+        font-weight: 600;
+    }
+    .stTextInput>div>input {
+        border-radius: 5px;
+        border: 1px solid #ccc;
+    }
+    .stTextArea textarea {
+        border-radius: 6px;
+        border: 1px solid #ccc;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+st.title("📂 Talent Intelligence Dashboard")
+st.markdown("<h4 style='color: #333;'>Empowering decisions through smart talent insights</h4>", unsafe_allow_html=True)
 
 @st.cache_data
 def convert_df_to_excel(df_result):
@@ -34,8 +75,9 @@ def extract_text_from_docx(uploaded_docx):
     return "\n".join([p.text for p in doc.paragraphs if p.text.strip() != ""])
 
 # Upload section
-st.sidebar.markdown("### 📁 Upload a new file")
-uploaded_file = st.sidebar.file_uploader("Upload Excel, CSV, PDF, or DOCX", type=["xlsx", "xls", "csv", "pdf", "docx"])
+st.sidebar.image("https://img.icons8.com/ios-filled/50/upload--v1.png", width=40)
+st.sidebar.markdown("### 📁 Upload Your Talent File")
+uploaded_file = st.sidebar.file_uploader("Supported formats: Excel, CSV, PDF, DOCX", type=["xlsx", "xls", "csv", "pdf", "docx"])
 
 df = None
 raw_text = None
@@ -85,7 +127,7 @@ if df is not None:
             st.dataframe(df)
 
         st.subheader("💬 Ask a Question")
-        query = st.text_input("Your question:")
+        query = st.text_input("Type a question about the data:")
 
         result = None
         response = ""
@@ -154,7 +196,7 @@ if df is not None:
                         response = "📋 Showing all talents with departments."
                         matched = True
 
-                if 'deployment status' in df.columns and "bar chart of deployment" in query or "deployment status chart" in query:
+                if 'deployment status' in df.columns and ("bar chart of deployment" in query or "deployment status chart" in query):
                     chart_data = df['deployment status'].value_counts()
                     st.subheader("📊 Deployment Status Chart")
                     st.bar_chart(chart_data)
