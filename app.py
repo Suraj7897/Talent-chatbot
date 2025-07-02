@@ -78,11 +78,10 @@ with st.expander("💡 What can I ask?"):
     - Export list of deployed talents
     """)
 
-# 📁 Sidebar Header (Replaced image with emoji)
-st.sidebar.markdown("### 📂 Talent File Uploader")
+# 📁 Sidebar Upload
+st.sidebar.markdown("### 📂 Upload Your Talent File")
 uploaded_file = st.sidebar.file_uploader("Supported formats: Excel, CSV, PDF, DOCX", type=["xlsx", "xls", "csv", "pdf", "docx"])
 
-# File Load
 raw_text = None
 df = None
 if uploaded_file:
@@ -138,7 +137,7 @@ if df is not None:
 
             if "on bench" in query:
                 result = df[df['deployment status'].str.lower() == "on bench"]
-                response = f"🪑 {len(result)} talents are on bench."
+                response = f"🧑‍💼 {len(result)} talents are on bench."
                 matched = True
 
             elif "deployed" in query:
@@ -212,19 +211,19 @@ if df is not None:
                     matched = True
 
         if response:
-            st.text_area("🤖 Bot Response", value=response, height=150)
+            st.text_area("🧑‍🧳 Bot Response", value=response, height=150)
 
         if result is not None:
             st.dataframe(result)
             st.download_button(
-                label="📥 Download Filtered Results as Excel",
+                label="📅 Download Filtered Results as Excel",
                 data=convert_df_to_excel(result),
                 file_name="filtered_results.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
         elif not matched:
-            st.text_area("🤖 Bot Response", value="🤖 Sorry, I couldn’t understand that question. Try asking about training, deployment, or departments.", height=150)
+            st.text_area("🧑‍🧳 Bot Response", value="🧑‍🧳 Sorry, I couldn’t understand that question. Try asking about training, deployment, or departments.", height=150)
 
     except Exception as e:
         st.warning(f"⚠️ Dashboard couldn't load due to: {e}")
