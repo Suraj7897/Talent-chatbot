@@ -56,6 +56,17 @@ st.markdown("""
         color: white;
         text-align: center;
     }
+    .sidebar-upload {
+        background-color: #ffffff;
+        padding: 1rem;
+        border-radius: 10px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        margin-bottom: 1rem;
+    }
+    .sidebar-upload h4 {
+        font-weight: bold;
+        margin-top: 0;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -78,10 +89,18 @@ with st.expander("💡 What can I ask?"):
     - Export list of deployed talents
     """)
 
-# 📁 Sidebar Upload
-st.sidebar.markdown("### 📂 Upload Your Talent File")
-uploaded_file = st.sidebar.file_uploader("Supported formats: Excel, CSV, PDF, DOCX", type=["xlsx", "xls", "csv", "pdf", "docx"])
+# 📁 Sidebar Upload Section
+with st.sidebar:
+    st.markdown("""
+    <div class='sidebar-upload'>
+        <h4>📂 Upload Your Talent File</h4>
+        <p><small>Supported formats: Excel, CSV, PDF, DOCX</small></p>
+    </div>
+    """, unsafe_allow_html=True)
 
+uploaded_file = st.sidebar.file_uploader("Drag & drop or browse file", type=["xlsx", "xls", "csv", "pdf", "docx"])
+
+# File Load
 raw_text = None
 df = None
 if uploaded_file:
@@ -137,7 +156,7 @@ if df is not None:
 
             if "on bench" in query:
                 result = df[df['deployment status'].str.lower() == "on bench"]
-                response = f"🧑‍💼 {len(result)} talents are on bench."
+                response = f"🪑 {len(result)} talents are on bench."
                 matched = True
 
             elif "deployed" in query:
@@ -211,19 +230,19 @@ if df is not None:
                     matched = True
 
         if response:
-            st.text_area("🧑‍🧳 Bot Response", value=response, height=150)
+            st.text_area("🤖 Bot Response", value=response, height=150)
 
         if result is not None:
             st.dataframe(result)
             st.download_button(
-                label="📅 Download Filtered Results as Excel",
+                label="📥 Download Filtered Results as Excel",
                 data=convert_df_to_excel(result),
                 file_name="filtered_results.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
         elif not matched:
-            st.text_area("🧑‍🧳 Bot Response", value="🧑‍🧳 Sorry, I couldn’t understand that question. Try asking about training, deployment, or departments.", height=150)
+            st.text_area("🤖 Bot Response", value="🤖 Sorry, I couldn’t understand that question. Try asking about training, deployment, or departments.", height=150)
 
     except Exception as e:
         st.warning(f"⚠️ Dashboard couldn't load due to: {e}")
