@@ -1,5 +1,3 @@
-# app.py (GPT-style question handling without GPT API, updated fallback handling and improved Talent_X query recognition)
-
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -48,15 +46,23 @@ if uploaded_file:
     if file_name.endswith((".xlsx", ".xls")):
         df = pd.read_excel(uploaded_file)
         df.columns = df.columns.str.strip().str.lower()
-        df['talent name'] = df['talent name'].str.strip()
-        save_to_db(df)
+        if 'talent name' in df.columns:
+            df['talent name'] = df['talent name'].str.strip()
+        try:
+            save_to_db(df)
+        except Exception as e:
+            st.warning(f"⚠️ Failed to save to DB: {e}")
         st.success("✅ New Excel file uploaded and saved to DB.")
 
     elif file_name.endswith(".csv"):
         df = pd.read_csv(uploaded_file)
         df.columns = df.columns.str.strip().str.lower()
-        df['talent name'] = df['talent name'].str.strip()
-        save_to_db(df)
+        if 'talent name' in df.columns:
+            df['talent name'] = df['talent name'].str.strip()
+        try:
+            save_to_db(df)
+        except Exception as e:
+            st.warning(f"⚠️ Failed to save to DB: {e}")
         st.success("✅ New CSV file uploaded and saved to DB.")
 
     elif file_name.endswith(".pdf"):
@@ -69,134 +75,125 @@ elif db_table_exists():
     df = load_from_db()
     st.success("📦 Data loaded from existing database.")
 
-# Show dashboard
 if df is not None:
     st.subheader("📊 Talent Summary Dashboard")
 
     try:
-        training_in_progress = df[df['training status'].str.lower() == "training in progress"].shape[0]
-        completed_seer = df[df['training status'].str.lower() == "completed seer training"].shape[0]
-        not_started = df[df['training status'].str.lower() == "not started"].shape[0]
-        on_bench = df[df['deployment status'].str.lower() == "on bench"].shape[0]
-        deployed = df[df['deployment status'].str.lower() == "deployed in project"].shape[0]
-        rolling_off = df[df['deployment status'].str.lower() == "rolling off"].shape[0]
-
-        col1, col2, col3 = st.columns(3)
-        col4, col5, col6 = st.columns(3)
-
-        col1.metric("🧠 In Training", training_in_progress)
-        col2.metric("🎓 SEER Completed", completed_seer)
-        col3.metric("🕒 Not Started", not_started)
-        col4.metric("🪑 On Bench", on_bench)
-        col5.metric("🧑‍💻 Deployed", deployed)
-        col6.metric("🚪 Rolling Off", rolling_off)
+        df_cols = df.columns.tolist()
 
         with st.expander("🔍 Preview Uploaded Table"):
             st.dataframe(df)
 
-        with st.expander("📥 Export Filtered Data"):
-            excel_data = convert_df_to_excel(df)
-            st.download_button("📥 Download Full Data as Excel", data=excel_data, file_name="talent_data.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-        # Simple keyword-based question handling
         st.subheader("💬 Ask a Question")
         query = st.text_input("Your question:")
 
-        if query:
-            query = query.lower()
-            result = None
-            chart_data = None
-            response = ""
-            matched = False
+        result = None
+        response = ""
+        matched = False
 
-            # Preprocess Talent_X detection
+        if query:
+            query = query.lower().strip()
             talent_match = re.search(r"talent[_\s]?(\d+)", query)
             talent_name = f"talent_{talent_match.group(1)}" if talent_match else None
 
-            if "on bench" in query:
-                result = df[df['deployment status'].str.lower() == "on bench"]
-                response = f"🪑 {len(result)} talents on bench."
-                matched = True
+            if any(x in df.columns for x in ['deployment status', 'training status']):
 
-            elif "deployed in project" in query or "who is deployed" in query:
-                result = df[df['deployment status'].str.lower() == "deployed in project"]
-                response = f"🧑‍💻 {len(result)} talents deployed in project."
-                matched = True
+                if 'deployment status' in df.columns:
+                    if "on bench" in query or "bench talents" in query:
+                        result = df[df['deployment status'].str.lower() == "on bench"]
+                        response = f"🪑 {len(result)} talents on bench."
+                        matched = True
 
-            elif "rolling off" in query:
-                result = df[df['deployment status'].str.lower() == "rolling off"]
-                response = f"🚪 {len(result)} talents rolling off."
-                matched = True
+                    elif "deployed in project" in query or "who is deployed" in query:
+                        result = df[df['deployment status'].str.lower() == "deployed in project"]
+                        response = f"🧑‍💻 {len(result)} talents deployed in project."
+                        matched = True
 
-            elif "completed seer" in query:
-                result = df[df['training status'].str.lower() == "completed seer training"]
-                response = f"🎓 {len(result)} talents completed SEER training."
-                matched = True
+                    elif "rolling off" in query:
+                        result = df[df['deployment status'].str.lower() == "rolling off"]
+                        response = f"🚪 {len(result)} talents rolling off."
+                        matched = True
 
-            elif "not started" in query:
-                result = df[df['training status'].str.lower() == "not started"]
-                response = f"🕒 {len(result)} talents haven't started training."
-                matched = True
+                if 'training status' in df.columns:
+                    if "completed seer" in query:
+                        result = df[df['training status'].str.lower() == "completed seer training"]
+                        response = f"🎓 {len(result)} talents completed SEER training."
+                        matched = True
 
-            elif "training in progress" in query:
-                result = df[df['training status'].str.lower() == "training in progress"]
-                response = f"🧠 {len(result)} talents currently in training."
-                matched = True
+                    elif "haven't started" in query or "not started" in query:
+                        result = df[df['training status'].str.lower() == "not started"]
+                        response = f"🕒 {len(result)} talents haven't started training."
+                        matched = True
 
-            elif "talents name with the department" in query:
-                result = df[['talent name', 'department']]
-                response = f"📋 Showing all talents with departments."
-                matched = True
+                    elif "training in progress" in query or "are in training" in query:
+                        result = df[df['training status'].str.lower() == "training in progress"]
+                        response = f"🧠 {len(result)} talents currently in training."
+                        matched = True
 
-            elif talent_name and "department" in query:
-                row = df[df['talent name'].str.lower() == talent_name]
-                if not row.empty:
-                    response = f"🏢 {talent_name.title()} is in the {row.iloc[0]['department']} department."
-                else:
-                    response = f"❌ Sorry, I couldn’t find {talent_name.title()} in the data."
-                matched = True
+                    elif "training status chart" in query or "pie chart of training" in query:
+                        chart_data = df['training status'].value_counts()
+                        st.subheader("📊 Training Status Chart")
+                        fig, ax = plt.subplots()
+                        chart_data.plot.pie(autopct='%1.1f%%', ax=ax)
+                        ax.set_ylabel("")
+                        st.pyplot(fig)
+                        matched = True
 
-            elif talent_name and "email" in query:
-                row = df[df['talent name'].str.lower() == talent_name]
-                if not row.empty:
-                    response = f"📧 Email of {talent_name.title()}: {row.iloc[0]['email']}"
-                else:
-                    response = f"❌ Sorry, I couldn’t find {talent_name.title()} in the data."
-                matched = True
+                if 'department' in df.columns:
+                    if "pie chart of department" in query or "department-wise distribution" in query:
+                        chart_data = df['department'].value_counts()
+                        st.subheader("📊 Department-wise Distribution")
+                        fig, ax = plt.subplots()
+                        chart_data.plot.pie(autopct='%1.1f%%', ax=ax)
+                        ax.set_ylabel("")
+                        st.pyplot(fig)
+                        matched = True
 
-            elif "pie chart of department" in query or "department-wise distribution" in query:
-                chart_data = df['department'].value_counts()
-                st.subheader("📊 Department-wise Distribution")
-                fig, ax = plt.subplots()
-                chart_data.plot.pie(autopct='%1.1f%%', ax=ax)
-                ax.set_ylabel("")
-                st.pyplot(fig)
-                matched = True
+                    if "talents name with the department" in query:
+                        result = df[['talent name', 'department']] if 'talent name' in df.columns else df[['department']]
+                        response = "📋 Showing all talents with departments."
+                        matched = True
 
-            elif "training status chart" in query or "pie chart of training" in query:
-                chart_data = df['training status'].value_counts()
-                st.subheader("📊 Training Status Chart")
-                fig, ax = plt.subplots()
-                chart_data.plot.pie(autopct='%1.1f%%', ax=ax)
-                ax.set_ylabel("")
-                st.pyplot(fig)
-                matched = True
+                if 'deployment status' in df.columns and "bar chart of deployment" in query or "deployment status chart" in query:
+                    chart_data = df['deployment status'].value_counts()
+                    st.subheader("📊 Deployment Status Chart")
+                    st.bar_chart(chart_data)
+                    matched = True
 
-            elif "bar chart of deployment" in query or "deployment status chart" in query:
-                chart_data = df['deployment status'].value_counts()
-                st.subheader("📊 Deployment Status Chart")
-                st.bar_chart(chart_data)
-                matched = True
+            if talent_name:
+                if "department" in query and 'talent name' in df.columns and 'department' in df.columns:
+                    row = df[df['talent name'].str.lower() == talent_name]
+                    if not row.empty:
+                        response = f"🏢 {talent_name.title()} is in the {row.iloc[0]['department']} department."
+                    else:
+                        response = f"❌ Sorry, I couldn’t find {talent_name.title()} in the data."
+                    matched = True
+
+                elif "email" in query and 'talent name' in df.columns and 'email' in df.columns:
+                    row = df[df['talent name'].str.lower() == talent_name]
+                    if not row.empty:
+                        response = f"📧 Email of {talent_name.title()}: {row.iloc[0]['email']}"
+                    else:
+                        response = f"❌ Sorry, I couldn’t find {talent_name.title()} in the data."
+                    matched = True
 
             if response:
                 st.text_area("🤖 Bot Response", value=response, height=150)
             elif not matched:
                 st.text_area("🤖 Bot Response", value="🤖 Sorry, I couldn’t understand that question. Try asking about training, deployment, or specific talents.", height=150)
+
             if result is not None:
                 st.dataframe(result)
+                excel_data = convert_df_to_excel(result)
+                st.download_button(
+                    label="📥 Download Filtered Results as Excel",
+                    data=excel_data,
+                    file_name="filtered_results.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
-    except Exception:
-        st.warning("Summary dashboard not shown. Check column names in uploaded data.")
+    except Exception as e:
+        st.warning(f"Summary dashboard not shown. Error: {e}")
 
 elif raw_text:
     st.subheader("📄 Uploaded Text Content Preview")
