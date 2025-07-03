@@ -139,6 +139,24 @@ if df is not None:
     st.subheader("📊 Talent Summary Dashboard")
 
     try:
+        # Summary Cards
+        training_in_progress = df[df['training status'].str.lower() == "training in progress"].shape[0]
+        completed_seer = df[df['training status'].str.lower() == "completed seer training"].shape[0]
+        not_started = df[df['training status'].str.lower() == "not started"].shape[0]
+        on_bench = df[df['deployment status'].str.lower() == "on bench"].shape[0]
+        deployed = df[df['deployment status'].str.lower() == "deployed in project"].shape[0]
+        rolling_off = df[df['deployment status'].str.lower() == "rolling off"].shape[0]
+
+        col1, col2, col3 = st.columns(3)
+        col4, col5, col6 = st.columns(3)
+
+        col1.metric("🧠 In Training", training_in_progress)
+        col2.metric("🎓 SEER Completed", completed_seer)
+        col3.metric("🕒 Not Started", not_started)
+        col4.metric("🪑 On Bench", on_bench)
+        col5.metric("🧑‍💻 Deployed", deployed)
+        col6.metric("🚪 Rolling Off", rolling_off)
+
         with st.expander("🔍 Preview Uploaded Table"):
             st.dataframe(df)
 
