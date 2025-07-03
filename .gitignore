@@ -1,1 +1,6 @@
+# Don't push database or secrets
+*.db
 secrets/
+__pycache__/
+.env
+*.pyc
