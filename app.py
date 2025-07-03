@@ -8,8 +8,21 @@ import docx
 from dotenv import load_dotenv
 from database import save_to_db, load_from_db, db_table_exists
 import re
+import firebase_admin
+from firebase_admin import credentials, firestore
 
+# Load environment variables
 load_dotenv()
+
+# Firebase Initialization
+
+if not firebase_admin._apps:
+    cred = credentials.Certificate("secrets/serviceAccountKey.json")
+    firebase_admin.initialize_app(cred)
+
+# Always define db
+db = firestore.client()
+
 
 st.set_page_config(page_title="🌟 Talent Intelligence Hub", page_icon="📊", layout="wide")
 
@@ -111,12 +124,14 @@ if uploaded_file:
         if 'talent name' in df.columns:
             df['talent name'] = df['talent name'].str.strip()
         save_to_db(df)
+        db.collection("uploads").add({"filename": uploaded_file.name, "rows": len(df), "source": "streamlit"})
     elif file_name.endswith(".csv"):
         df = pd.read_csv(uploaded_file)
         df.columns = df.columns.str.strip().str.lower()
         if 'talent name' in df.columns:
             df['talent name'] = df['talent name'].str.strip()
         save_to_db(df)
+        db.collection("uploads").add({"filename": uploaded_file.name, "rows": len(df), "source": "streamlit"})
     elif file_name.endswith(".pdf"):
         raw_text = fitz.open(stream=uploaded_file.read(), filetype="pdf")
     elif file_name.endswith(".docx"):
@@ -134,12 +149,11 @@ def convert_df_to_excel(df_result):
     output.seek(0)
     return output
 
-# 🧠 Smart Query Area
+# Talent Summary Dashboard and Bot Response
 if df is not None:
     st.subheader("📊 Talent Summary Dashboard")
 
     try:
-        # Summary Cards
         training_in_progress = df[df['training status'].str.lower() == "training in progress"].shape[0]
         completed_seer = df[df['training status'].str.lower() == "completed seer training"].shape[0]
         not_started = df[df['training status'].str.lower() == "not started"].shape[0]
@@ -153,8 +167,8 @@ if df is not None:
         col1.metric("🧠 In Training", training_in_progress)
         col2.metric("🎓 SEER Completed", completed_seer)
         col3.metric("🕒 Not Started", not_started)
-        col4.metric("🪑 On Bench", on_bench)
-        col5.metric("🧑‍💻 Deployed", deployed)
+        col4.metric("🧱 On Bench", on_bench)
+        col5.metric("🧑‍💼 Deployed", deployed)
         col6.metric("🚪 Rolling Off", rolling_off)
 
         with st.expander("🔍 Preview Uploaded Table"):
@@ -174,17 +188,17 @@ if df is not None:
 
             if "on bench" in query:
                 result = df[df['deployment status'].str.lower() == "on bench"]
-                response = f"🪑 {len(result)} talents are on bench."
+                response = f"🧱 {len(result)} talents are on bench."
                 matched = True
 
             elif "deployed" in query:
                 result = df[df['deployment status'].str.lower() == "deployed in project"]
-                response = f"🧑‍💻 {len(result)} talents are deployed."
+                response = f"🧑‍💼 {len(result)} talents are deployed."
                 matched = True
 
             elif "rolling off" in query:
                 result = df[df['deployment status'].str.lower() == "rolling off"]
-                response = f"📤 {len(result)} talents are rolling off."
+                response = f"🛄 {len(result)} talents are rolling off."
                 matched = True
 
             elif "completed seer" in query:
@@ -248,19 +262,19 @@ if df is not None:
                     matched = True
 
         if response:
-            st.text_area("🤖 Bot Response", value=response, height=150)
+            st.text_area("🧐 Bot Response", value=response, height=150)
 
         if result is not None:
             st.dataframe(result)
             st.download_button(
-                label="📥 Download Filtered Results as Excel",
+                label="📅 Download Filtered Results as Excel",
                 data=convert_df_to_excel(result),
                 file_name="filtered_results.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
         elif not matched:
-            st.text_area("🤖 Bot Response", value="🤖 Sorry, I couldn’t understand that question. Try asking about training, deployment, or departments.", height=150)
+            st.text_area("🧐 Bot Response", value="🧐 Sorry, I couldn’t understand that question. Try asking about training, deployment, or departments.", height=150)
 
     except Exception as e:
         st.warning(f"⚠️ Dashboard couldn't load due to: {e}")

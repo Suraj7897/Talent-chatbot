@@ -3,7 +3,5 @@ pandas
 matplotlib
 python-docx
 PyMuPDF
-sqlalchemy
 python-dotenv
-openpyxl
-xlsxwriter
+firebase-admin
