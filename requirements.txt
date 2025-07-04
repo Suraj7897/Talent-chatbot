@@ -1,7 +1,8 @@
 streamlit
 pandas
 matplotlib
+openpyxl
 python-docx
 PyMuPDF
+sqlalchemy
 python-dotenv
-
