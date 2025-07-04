@@ -2,7 +2,9 @@ streamlit
 pandas
 matplotlib
 openpyxl
-python-docx
-PyMuPDF
 sqlalchemy
+python-docx
+pymupdf
+fpdf
 python-dotenv
+xlsxwriter
