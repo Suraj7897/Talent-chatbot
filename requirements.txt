@@ -4,4 +4,4 @@ matplotlib
 python-docx
 PyMuPDF
 python-dotenv
-firebase-admin
+
