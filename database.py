@@ -1,20 +1,34 @@
 # database.py
 
-from sqlalchemy import create_engine, text
+import sqlite3
 import pandas as pd
+import os
 
-DB_FILE = "sqlite:///talent.db"
-engine = create_engine(DB_FILE)
+DB_FILE = "talent_data.db"
+TABLE_NAME = "talent"
 
-def save_to_db(df, table_name="talent_data"):
-    df.to_sql(table_name, con=engine, if_exists="replace", index=False)
+def init_db():
+    if not os.path.exists(DB_FILE):
+        conn = sqlite3.connect(DB_FILE)
+        conn.close()
 
-def load_from_db(table_name="talent_data"):
-    return pd.read_sql(f"SELECT * FROM {table_name}", con=engine)
+def save_to_db(df: pd.DataFrame):
+    conn = sqlite3.connect(DB_FILE)
+    df.to_sql(TABLE_NAME, conn, if_exists='replace', index=False)
+    conn.close()
 
-def db_table_exists(table_name="talent_data"):
-    with engine.connect() as conn:
-        result = conn.execute(
-            text(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}';")
-        )
-        return result.fetchone() is not None
+def load_from_db():
+    conn = sqlite3.connect(DB_FILE)
+    df = pd.read_sql_query(f"SELECT * FROM {TABLE_NAME}", conn)
+    conn.close()
+    return df
+
+def db_table_exists():
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (TABLE_NAME,))
+    exists = cursor.fetchone() is not None
+    conn.close()
+    return exists
+
+init_db()

@@ -1,4 +1,4 @@
-# app.py (Final Combined Version - With UI, Enhanced Excel Download UI, Logging, and SQLite)
+# app.py (Bug-fixed version with dynamic file reload support)
 
 import streamlit as st
 import pandas as pd
@@ -76,10 +76,11 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
-uploaded_file = st.sidebar.file_uploader("Drag & drop or browse file", type=["xlsx", "xls", "csv", "pdf", "docx"])
+    uploaded_file = st.file_uploader("Drag & drop or browse file", type=["xlsx", "xls", "csv", "pdf", "docx"])
 
 # Helpers
 @st.cache_data
+
 def convert_df_to_excel(df_result):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -99,31 +100,34 @@ def show_chat_history():
             with open(CHAT_LOG_FILE, "r", encoding="utf-8") as log:
                 st.text_area("Chat History", value=log.read(), height=300)
 
-# Load file
+# Load and update df
 raw_text = None
-df = None
-if 'df' not in st.session_state:
-    if uploaded_file:
-        file_name = uploaded_file.name.lower()
-        if file_name.endswith((".xlsx", ".xls")):
-            df = pd.read_excel(uploaded_file)
-        elif file_name.endswith(".csv"):
-            df = pd.read_csv(uploaded_file)
-        elif file_name.endswith(".pdf"):
-            raw_text = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-        elif file_name.endswith(".docx"):
-            raw_text = docx.Document(uploaded_file)
-        if df is not None:
-            df.columns = df.columns.str.strip().str.lower()
-            if 'talent name' in df.columns:
-                df['talent name'] = df['talent name'].str.strip()
-            save_to_db(df)
-            st.session_state.df = df
-    elif db_table_exists():
-        df = load_from_db()
+if uploaded_file:
+    file_name = uploaded_file.name.lower()
+    if file_name.endswith((".xlsx", ".xls")):
+        df = pd.read_excel(uploaded_file)
+    elif file_name.endswith(".csv"):
+        df = pd.read_csv(uploaded_file)
+    elif file_name.endswith(".pdf"):
+        raw_text = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+        df = None
+    elif file_name.endswith(".docx"):
+        raw_text = docx.Document(uploaded_file)
+        df = None
+    else:
+        df = None
+
+    if df is not None:
+        df.columns = df.columns.str.strip().str.lower()
+        if 'talent name' in df.columns:
+            df['talent name'] = df['talent name'].str.strip()
+        save_to_db(df)
         st.session_state.df = df
 else:
-    df = st.session_state.df
+    if db_table_exists():
+        st.session_state.df = load_from_db()
+
+df = st.session_state.get("df")
 
 if df is not None:
     st.subheader("📊 Talent Summary Dashboard")
@@ -219,7 +223,7 @@ if df is not None:
                     matched = True
 
         if response:
-            st.text_area("🤖 Bot Response", value=response, height=150)
+            st.text_area("🧠 Bot Response", value=response, height=150)
             save_chat(query, response)
 
         if result is not None:
@@ -232,8 +236,8 @@ if df is not None:
             st.download_button("⬇️ Download Excel", data=convert_df_to_excel(result), file_name="filtered_results.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         elif not matched:
-            default_response = "🤖 Sorry, I couldn’t understand that question. Try asking about training, deployment, or departments."
-            st.text_area("🤖 Bot Response", value=default_response, height=150)
+            default_response = "🧠 Sorry, I couldn’t understand that question. Try asking about training, deployment, or departments."
+            st.text_area("🧠 Bot Response", value=default_response, height=150)
             save_chat(query, default_response)
 
         show_chat_history()
