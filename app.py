@@ -1,252 +1,193 @@
-# app.py (Bug-fixed version with dynamic file reload support)
+# app.py (Enhanced ChatGPT-style Talent Intelligence App)
 
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-import io
-import os
-import fitz  # PyMuPDF for PDF
+import fitz  # PyMuPDF
 import docx
-from dotenv import load_dotenv
-from database import save_to_db, load_from_db, db_table_exists
+import os
+import io
 import re
 import datetime
+import time
+import matplotlib.pyplot as plt
+from dotenv import load_dotenv
+from database import save_to_db, load_from_db, db_table_exists
+from groq import Groq
 
+# Load environment variables
 load_dotenv()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-st.set_page_config(page_title="🌟 Talent Intelligence Hub", page_icon="📊", layout="wide")
+# Groq client
+groq_client = Groq(api_key=GROQ_API_KEY)
 
-# Inject CSS styles
+# ----- Streamlit Config -----
+st.set_page_config(page_title="🤖 Talent Intelligence Hub", page_icon="🧠", layout="wide")
+
+if "df" not in st.session_state: st.session_state.df = None
+if "text" not in st.session_state: st.session_state.text = ""
+if "chat_history" not in st.session_state: st.session_state.chat_history = []
+
+# ----- Styling -----
 st.markdown("""
-    <style>
+<style>
     .main { background-color: #f4f8fb; }
-    .block-container { padding-top: 2rem; padding-bottom: 2rem; }
-    .stButton>button { background-color: #0066cc; color: white; border-radius: 5px; font-weight: 600; }
-    .stDownloadButton>button {
-        background-color: #34d399;
-        color: white;
-        border-radius: 8px;
-        font-weight: 600;
-        padding: 0.6rem 1.5rem;
-        border: 2px solid #059669;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-        font-size: 1rem;
-        margin-top: 1rem;
-        transition: all 0.3s ease-in-out;
+    .stButton>button, .stDownloadButton>button {
+        font-weight: 600; border-radius: 8px; color: white;
     }
-    .stDownloadButton>button:hover {
-        background-color: #10b981;
-        transform: scale(1.03);
-    }
-    .stTextInput>div>input, .stTextArea textarea { border-radius: 5px; border: 1px solid #ccc; }
+    .stButton>button { background-color: #2563eb; }
+    .stDownloadButton>button { background-color: #10b981; }
     .welcome-banner {
-        background: linear-gradient(to right, #003366, #006699);
+        background: linear-gradient(to right, #1e3a8a, #2563eb);
         padding: 2rem; border-radius: 10px; color: white; text-align: center;
     }
-    .sidebar-upload {
-        background-color: #ffffff; padding: 1rem; border-radius: 10px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 1rem;
+    .chat-box {
+        background-color: white; border-radius: 10px; padding: 1rem;
+        margin-bottom: 1rem; box-shadow: 0 2px 5px rgba(0,0,0,0.1);
     }
-    </style>
+</style>
 """, unsafe_allow_html=True)
 
 st.markdown("""
 <div class='welcome-banner'>
-    <h1>👋 Welcome to the Talent Intelligence Hub</h1>
-    <p>Empowering decisions through smart talent insights</p>
+    <h1>🤖 Talent Intelligence Hub (AI-Powered)</h1>
+    <p>Upload your file and ask anything — powered by LLaMA3 via Groq</p>
 </div>
 """, unsafe_allow_html=True)
 
-with st.expander("💡 What can I ask?"):
-    st.markdown("""
-    - Who is on bench?
-    - Talent_3 is in which department?
-    - Email of Talent_4
-    - Show pie chart of department
-    - Who completed SEER training?
-    - Show training status chart
-    - Export list of deployed talents
-    """)
-
+# ----- Sidebar -----
 with st.sidebar:
-    st.markdown("""
-    <div class='sidebar-upload'>
-        <h4>📂 Upload Your Talent File</h4>
-        <p><small>Supported formats: Excel, CSV, PDF, DOCX</small></p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.header("📂 Upload Talent File")
+    uploaded_file = st.file_uploader("Upload Excel/CSV/PDF/DOCX", type=["xlsx", "xls", "csv", "pdf", "docx"])
+    model_choice = st.radio("🤖 Choose LLM Engine", ["Groq (LLaMA3)", "OpenAI GPT (Coming Soon)", "Ollama (Local - Coming Soon)"])
 
-    uploaded_file = st.file_uploader("Drag & drop or browse file", type=["xlsx", "xls", "csv", "pdf", "docx"])
-
-# Helpers
-@st.cache_data
-
-def convert_df_to_excel(df_result):
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df_result.to_excel(writer, index=False, sheet_name='Filtered Results')
-    output.seek(0)
-    return output
-
+# ----- Chat Log File -----
 CHAT_LOG_FILE = "chat_log.txt"
-def save_chat(query, response):
-    with open(CHAT_LOG_FILE, "a", encoding="utf-8") as log:
-        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log.write(f"[{now}]\nQ: {query}\nA: {response}\n\n")
+
+def save_chat(q, a):
+    with open(CHAT_LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(f"[{datetime.datetime.now()}]\nQ: {q}\nA: {a}\n\n")
 
 def show_chat_history():
     if os.path.exists(CHAT_LOG_FILE):
-        with st.expander("📜 Chat History (Local)"):
-            with open(CHAT_LOG_FILE, "r", encoding="utf-8") as log:
-                st.text_area("Chat History", value=log.read(), height=300)
+        with st.expander("🕘 Chat History"):
+            with open(CHAT_LOG_FILE, "r", encoding="utf-8") as f:
+                st.text_area("Chat Log", f.read(), height=300)
 
-# Load and update df
-raw_text = None
+# ----- File Processing -----
+raw_text = ""
+df = None
 if uploaded_file:
-    file_name = uploaded_file.name.lower()
-    if file_name.endswith((".xlsx", ".xls")):
+    filename = uploaded_file.name.lower()
+    if filename.endswith((".xlsx", ".xls")):
         df = pd.read_excel(uploaded_file)
-    elif file_name.endswith(".csv"):
+    elif filename.endswith(".csv"):
         df = pd.read_csv(uploaded_file)
-    elif file_name.endswith(".pdf"):
-        raw_text = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-        df = None
-    elif file_name.endswith(".docx"):
-        raw_text = docx.Document(uploaded_file)
-        df = None
-    else:
-        df = None
+    elif filename.endswith(".pdf"):
+        doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+        raw_text = "\n".join([page.get_text() for page in doc])
+    elif filename.endswith(".docx"):
+        doc = docx.Document(uploaded_file)
+        raw_text = "\n".join([para.text for para in doc.paragraphs])
 
     if df is not None:
         df.columns = df.columns.str.strip().str.lower()
-        if 'talent name' in df.columns:
-            df['talent name'] = df['talent name'].str.strip()
         save_to_db(df)
         st.session_state.df = df
-else:
-    if db_table_exists():
-        st.session_state.df = load_from_db()
+        st.session_state.text = ""
+        st.session_state.chat_history = []
+    else:
+        st.session_state.df = None
+        st.session_state.text = raw_text
+        st.session_state.chat_history = []
 
-df = st.session_state.get("df")
+# ----- LLM Logic -----
+def query_groq(prompt):
+    try:
+        response = groq_client.chat.completions.create(
+            model="llama3-8b-8192",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": prompt},
+            ]
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"❌ Groq Error: {e}"
+
+def run_llm(prompt):
+    if model_choice.startswith("Groq"):
+        return query_groq(prompt)
+    elif model_choice.startswith("OpenAI"):
+        return "🔒 OpenAI GPT integration coming soon"
+    elif model_choice.startswith("Ollama"):
+        return "🔒 Local Ollama model coming soon"
+    else:
+        return "❓ Unknown LLM selected"
+
+# ----- Main Chat UI -----
+df = st.session_state.df
+text = st.session_state.text
 
 if df is not None:
-    st.subheader("📊 Talent Summary Dashboard")
-    try:
-        training_in_progress = df[df['training status'].str.lower() == "training in progress"].shape[0]
-        completed_seer = df[df['training status'].str.lower() == "completed seer training"].shape[0]
-        not_started = df[df['training status'].str.lower() == "not started"].shape[0]
-        on_bench = df[df['deployment status'].str.lower() == "on bench"].shape[0]
-        deployed = df[df['deployment status'].str.lower() == "deployed in project"].shape[0]
-        rolling_off = df[df['deployment status'].str.lower() == "rolling off"].shape[0]
+    st.subheader("📊 Uploaded Talent Data")
+    st.dataframe(df, use_container_width=True)
 
-        col1, col2, col3 = st.columns(3)
-        col4, col5, col6 = st.columns(3)
+    st.subheader("💬 Ask AI about the data")
+    user_query = st.text_input("Ask a question like: 'How many completed SEER training?'")
 
-        col1.metric("🧐 In Training", training_in_progress)
-        col2.metric("🎓 SEER Completed", completed_seer)
-        col3.metric("🕒 Not Started", not_started)
-        col4.metric("🪑 On Bench", on_bench)
-        col5.metric("🧑‍💼 Deployed", deployed)
-        col6.metric("🚪 Rolling Off", rolling_off)
+    if user_query:
+        preview = df.to_markdown(index=False)[:18000]
+        prompt = f"""You are a helpful assistant. A user has uploaded a dataset and asked a question.
 
-        with st.expander("🔍 Preview Uploaded Table"):
-            st.dataframe(df)
+Here is a preview of the data:
+{preview}
 
-        st.subheader("💬 Ask a Question")
-        query = st.text_input("Type a question about the data:")
+Now answer this:
+{user_query.strip()}
 
-        result = None
-        response = ""
-        matched = False
+Instructions:
+- Give exact numbers
+- Mention names or departments if relevant
+- Use **markdown**
+- Suggest a chart if useful
+"""
+        start = time.time()
+        ai_response = run_llm(prompt)
+        elapsed = time.time() - start
 
-        if query:
-            query = query.lower().strip()
-            talent_match = re.search(r"talent[_\s]?(\d+)", query)
-            talent_name = f"talent_{talent_match.group(1)}" if talent_match else None
+        st.session_state.chat_history.append((user_query, ai_response))
+        save_chat(user_query, ai_response)
 
-            if "on bench" in query:
-                result = df[df['deployment status'].str.lower() == "on bench"]
-                response = f"🪑 {len(result)} talents are on bench."
-                matched = True
-            elif "deployed" in query:
-                result = df[df['deployment status'].str.lower() == "deployed in project"]
-                response = f"🧑‍💼 {len(result)} talents are deployed."
-                matched = True
-            elif "rolling off" in query:
-                result = df[df['deployment status'].str.lower() == "rolling off"]
-                response = f"📄 {len(result)} talents are rolling off."
-                matched = True
-            elif "completed seer" in query:
-                result = df[df['training status'].str.lower() == "completed seer training"]
-                response = f"🎓 {len(result)} talents completed SEER training."
-                matched = True
-            elif "not started" in query:
-                result = df[df['training status'].str.lower() == "not started"]
-                response = f"⏳ {len(result)} haven't started training."
-                matched = True
-            elif "training in progress" in query:
-                result = df[df['training status'].str.lower() == "training in progress"]
-                response = f"🧐 {len(result)} talents are currently in training."
-                matched = True
-            elif "pie chart of department" in query:
-                chart_data = df['department'].value_counts()
-                st.subheader("📊 Department-wise Distribution")
+        st.info(f"⚡ Response generated in {elapsed:.2f} seconds")
+
+    for q, a in reversed(st.session_state.chat_history):
+        st.markdown(f"""
+<div class='chat-box'>
+<strong>🧑‍💼 You:</strong> {q}
+
+**🤖 AI:** {a}
+</div>
+""", unsafe_allow_html=True)
+
+        # Auto-detect and render simple charts
+        if "bar chart" in a.lower() and df is not None:
+            st.subheader("📊 Suggested Bar Chart")
+            try:
                 fig, ax = plt.subplots()
-                chart_data.plot.pie(autopct='%1.1f%%', ax=ax)
-                ax.set_ylabel("")
+                df.iloc[:, 0].value_counts().plot(kind='bar', ax=ax)
                 st.pyplot(fig)
-                matched = True
-            elif "training status chart" in query:
-                chart_data = df['training status'].value_counts()
-                st.subheader("📊 Training Status Distribution")
-                fig, ax = plt.subplots()
-                chart_data.plot.pie(autopct='%1.1f%%', ax=ax)
-                ax.set_ylabel("")
-                st.pyplot(fig)
-                matched = True
-            elif "bar chart of deployment" in query:
-                chart_data = df['deployment status'].value_counts()
-                st.subheader("📊 Deployment Status")
-                st.bar_chart(chart_data)
-                matched = True
-            elif "talents name with the department" in query:
-                result = df[['talent name', 'department']]
-                response = "📋 Talent names and their departments:"
-                matched = True
-            elif talent_name:
-                row = df[df['talent name'].str.lower() == talent_name]
-                if "department" in query and 'department' in df.columns:
-                    response = f"🏢 {talent_name.title()} is in the {row.iloc[0]['department']} department." if not row.empty else f"❌ Talent '{talent_name}' not found."
-                    matched = True
-                elif "email" in query and 'email' in df.columns:
-                    response = f"📧 Email of {talent_name.title()}: {row.iloc[0]['email']}" if not row.empty else f"❌ Email not found for {talent_name}."
-                    matched = True
+            except Exception as e:
+                st.warning(f"❌ Couldn't render chart: {e}")
 
-        if response:
-            st.text_area("🧠 Bot Response", value=response, height=150)
-            save_chat(query, response)
+    if os.path.exists(CHAT_LOG_FILE):
+        with open(CHAT_LOG_FILE, "rb") as f:
+            st.download_button("⬇️ Download Chat Log", data=f, file_name="chat_history.txt")
 
-        if result is not None:
-            st.dataframe(result)
-            st.markdown("""
-            <div style='background-color:#e0f2f1; padding:1rem; border-radius:8px; margin-top:1.5rem; margin-bottom:1rem;'>
-                <h4>📁 Export Filtered Data</h4>
-            </div>
-            """, unsafe_allow_html=True)
-            st.download_button("⬇️ Download Excel", data=convert_df_to_excel(result), file_name="filtered_results.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    show_chat_history()
 
-        elif not matched:
-            default_response = "🧠 Sorry, I couldn’t understand that question. Try asking about training, deployment, or departments."
-            st.text_area("🧠 Bot Response", value=default_response, height=150)
-            save_chat(query, default_response)
-
-        show_chat_history()
-
-    except Exception as e:
-        st.warning(f"⚠️ Dashboard couldn't load due to: {e}")
-
-elif raw_text:
-    st.subheader("📄 Text Extracted from Document")
-    st.text_area("File Content Preview", raw_text[:3000])
+elif text:
+    st.subheader("📄 Document Preview")
+    st.text_area("Extracted Text from File", text[:3000])
 else:
-    st.info("📌 Upload a file or rely on the existing database.")
+    st.info("📥 Upload a document or spreadsheet to get started.")
