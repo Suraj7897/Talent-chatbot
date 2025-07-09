@@ -1,4 +1,4 @@
-# app.py (Updated with Pie/Bar Chart + Download Support + Auto Chart Detection)
+# app.py (Improved chart detection for any keyword)
 import streamlit as st
 import pandas as pd
 import io
@@ -15,9 +15,8 @@ from groq import Groq
 
 load_dotenv()
 
-st.set_page_config(page_title="🤖 Talent Intelligence Hub (AI)", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="🧠 Talent Intelligence Hub (AI)", page_icon="🧠", layout="wide")
 
-# Initialize session state
 if "df" not in st.session_state:
     st.session_state.df = None
 if "text" not in st.session_state:
@@ -25,10 +24,7 @@ if "text" not in st.session_state:
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# Load API key
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-# Groq client
 client = Groq(api_key=GROQ_API_KEY)
 
 def query_llama(prompt):
@@ -44,7 +40,6 @@ def query_llama(prompt):
     except Exception as e:
         return f"❌ Groq Error: {e}"
 
-# UI Styling
 st.markdown("""
 <style>
     .main { background-color: #f4f8fb; }
@@ -60,20 +55,17 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Header
 st.markdown("""
 <div class='welcome-banner'>
-    <h1>🤖 Talent Intelligence Hub (AI-Powered)</h1>
+    <h1>🧠 Talent Intelligence Hub (AI-Powered)</h1>
     <p>Upload your document and ask anything — powered by LLaMA3 via Groq</p>
 </div>
 """, unsafe_allow_html=True)
 
-# Sidebar
 with st.sidebar:
     st.header("📂 Upload Talent File")
     uploaded_file = st.file_uploader("Upload Excel/CSV/PDF/DOCX", type=["xlsx", "xls", "csv", "pdf", "docx"])
 
-# Chat Log
 CHAT_LOG_FILE = "chat_log.txt"
 def save_chat(query, response):
     with open(CHAT_LOG_FILE, "a", encoding="utf-8") as log:
@@ -86,7 +78,6 @@ def show_chat_history():
             with open(CHAT_LOG_FILE, "r", encoding="utf-8") as log:
                 st.text_area("Chat Log", value=log.read(), height=300)
 
-# File Processing
 raw_text = None
 full_text = ""
 df = None
@@ -117,7 +108,6 @@ else:
     st.session_state.df = None
     st.session_state.text = ""
 
-# -------------------- MAIN UI -------------------- #
 df = st.session_state.df
 full_text = st.session_state.text
 
@@ -143,56 +133,64 @@ Now answer this:
 Please:
 - Provide exact counts when applicable
 - Mention relevant names or departments
-- Use markdown formatting (bullets, bold)
-- Suggest a chart (if useful)
+- Use markdown formatting (bullets, **bold**)
 """
             response = query_llama(prompt)
             st.session_state.chat_history.append((user_query, response))
             save_chat(user_query, response)
-            st.markdown(response)
 
-            # Chart rendering based on query
+            st.markdown(f"""
+<div class='chat-box'>
+<strong>🧑‍🏬 You:</strong> {user_query}
+
+**🧠 AI:** {response}
+</div>
+""", unsafe_allow_html=True)
+
             chart_placeholder = st.empty()
-            col_match = None
-            if any(x in user_query.lower() for x in ["pie chart", "distribution", "percentage"]):
-                col_match = [col for col in df.columns if "department" in col.lower() or "category" in col.lower()]
-                if col_match:
-                    data = df[col_match[0]].value_counts()
-                    fig, ax = plt.subplots()
-                    ax.pie(data, labels=data.index, autopct='%1.1f%%', startangle=90)
-                    ax.axis('equal')
-                    chart_placeholder.pyplot(fig)
+            matched_column = None
+            lowered_query = user_query.lower()
 
-            elif any(x in user_query.lower() for x in ["bar chart", "comparison", "count"]):
-                col_match = [col for col in df.columns if "department" in col.lower() or "role" in col.lower()]
-                if col_match:
-                    data = df[col_match[0]].value_counts()
-                    fig, ax = plt.subplots()
+            chart_keywords = ["chart", "graph", "distribution", "pie", "bar"]
+            if any(word in lowered_query for word in chart_keywords):
+                smart_targets = ["type", "status", "department", "category"]
+                for col in df.columns:
+                    for key in smart_targets:
+                        if key in col.lower():
+                            matched_column = col
+                            break
+                    if matched_column:
+                        break
+                if not matched_column:
+                    for col in df.columns:
+                        if df[col].dtype == "object" or df[col].nunique() < len(df) / 2:
+                            matched_column = col
+                            break
+
+            if matched_column:
+                data = df[matched_column].value_counts()
+                labels = [f"{label} ({value} | {value / data.sum() * 100:.1f}%)" for label, value in zip(data.index, data.values)]
+
+                fig, ax = plt.subplots()
+                if "pie" in lowered_query:
+                    ax.pie(data, labels=labels, startangle=90)
+                    ax.set_title(f"Pie Chart: {matched_column.title()} Distribution")
+                    ax.axis("equal")
+                else:
                     ax.bar(data.index, data.values, color="#4f46e5")
-                    ax.set_xlabel(col_match[0].capitalize())
+                    ax.set_title(f"Bar Chart: {matched_column.title()} Distribution")
+                    ax.set_xlabel(matched_column.title())
                     ax.set_ylabel("Count")
-                    ax.set_title("Bar Chart")
                     plt.xticks(rotation=45)
-                    chart_placeholder.pyplot(fig)
 
-            if col_match:
-                # Chart download button
+                chart_placeholder.pyplot(fig)
+
                 chart_buf = io.BytesIO()
                 fig.savefig(chart_buf, format='png')
-                st.download_button("📥 Download Chart", data=chart_buf.getvalue(), file_name="chart.png", mime="image/png")
+                st.download_button("🗕️ Download Chart", data=chart_buf.getvalue(), file_name="chart.png", mime="image/png")
 
         except Exception as e:
             st.warning(f"⚠️ Failed to answer: {e}")
-
-    for i, (q, a) in enumerate(reversed(st.session_state.chat_history)):
-        with st.container():
-            st.markdown(f"""
-<div class='chat-box'>
-<strong>🧑‍💼 You:</strong> {q}
-
-**🤖 AI:** {a}
-</div>
-""", unsafe_allow_html=True)
 
     if os.path.exists(CHAT_LOG_FILE):
         with open(CHAT_LOG_FILE, "rb") as f:
@@ -204,4 +202,4 @@ elif full_text:
     st.subheader("📄 Uploaded Document Preview")
     st.text_area("Extracted Text from File", full_text[:3000])
 else:
-    st.info("📥 Upload an Excel, PDF, or DOCX file to start asking questions.")
+    st.info("🗕 Upload an Excel, PDF, or DOCX file to start asking questions.")
