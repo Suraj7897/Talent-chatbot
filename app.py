@@ -114,7 +114,6 @@ if uploaded_file or file_link:
         if uploaded_file:
             filename = uploaded_file.name.lower()
         else:
-            # Infer file type from content-type
             if "sheet" in content_type:
                 filename = "temp.xlsx"
             elif "csv" in content_type:
@@ -173,10 +172,7 @@ Here is a preview of the data:
 Now answer this:
 {user_query.strip()}
 
-Please:
-- Provide exact counts when applicable
-- Mention relevant names or departments
-- Use markdown formatting (bullets, **bold**)
+Respond clearly. Use charts or tables if helpful.
 """
             response = query_llama(prompt)
             st.session_state.chat_history.append((user_query, response))
@@ -189,57 +185,48 @@ Please:
 **🧠 AI:** {response}
 </div>
 """, unsafe_allow_html=True)
-
-            chart_placeholder = st.empty()
-            matched_column = None
-            lowered_query = user_query.lower()
-
-            chart_keywords = ["chart", "graph", "distribution", "pie", "bar"]
-            if any(word in lowered_query for word in chart_keywords):
-                smart_targets = ["status", "type", "category", "department"]
-                for col in df.columns:
-                    if any(key in col.lower() for key in smart_targets):
-                        matched_column = col
-                        break
-                if not matched_column:
-                    for col in df.columns:
-                        if df[col].dtype == "object" or df[col].nunique() < len(df) / 2:
-                            matched_column = col
-                            break
-
-            if matched_column:
-                data = df[matched_column].value_counts()
-                labels = [f"{label} ({value} | {value / data.sum() * 100:.1f}%)" for label, value in zip(data.index, data.values)]
-
-                fig, ax = plt.subplots()
-                if "pie" in lowered_query:
-                    ax.pie(data, labels=labels, startangle=90)
-                    ax.set_title(f"Pie Chart: {matched_column.title()} Distribution")
-                    ax.axis("equal")
-                else:
-                    ax.bar(data.index, data.values, color="#4f46e5")
-                    ax.set_title(f"Bar Chart: {matched_column.title()} Distribution")
-                    ax.set_xlabel(matched_column.title())
-                    ax.set_ylabel("Count")
-                    plt.xticks(rotation=45)
-
-                chart_placeholder.pyplot(fig)
-
-                chart_buf = io.BytesIO()
-                fig.savefig(chart_buf, format='png')
-                st.download_button("🗕️ Download Chart", data=chart_buf.getvalue(), file_name="chart.png", mime="image/png")
-
         except Exception as e:
             st.warning(f"⚠️ Failed to answer: {e}")
-
-    if os.path.exists(CHAT_LOG_FILE):
-        with open(CHAT_LOG_FILE, "rb") as f:
-            st.download_button("⬇️ Export Chat as TXT", data=f, file_name="chat_history.txt")
 
     show_chat_history()
 
 elif full_text:
     st.subheader("📄 Uploaded Document Preview")
-    st.text_area("Extracted Text from File", full_text[:3000])
+    st.text_area("Extracted Text from File", full_text[:3000], height=300)
+
+    st.subheader("💬 Ask AI about the document")
+    user_query = st.text_input("Ask me any question regarding your file", key="doc_query_input")
+
+    if user_query:
+        try:
+            prompt = f"""
+You are a helpful assistant. A user uploaded a document and asked a question.
+
+Document snippet:
+{full_text[:18000]}
+
+Now answer this:
+{user_query.strip()}
+
+Please:
+- Give a clear and concise answer
+- Use markdown if needed
+"""
+            response = query_llama(prompt)
+            st.session_state.chat_history.append((user_query, response))
+            save_chat(user_query, response)
+
+            st.markdown(f"""
+<div class='chat-box'>
+<strong>🧑‍🏬 You:</strong> {user_query}
+
+**🧠 AI:** {response}
+</div>
+""", unsafe_allow_html=True)
+        except Exception as e:
+            st.warning(f"⚠️ Failed to answer: {e}")
+
+    show_chat_history()
+
 else:
     st.info("🗕 Upload an Excel, PDF, or DOCX file or paste a Drive link to start asking questions.")
