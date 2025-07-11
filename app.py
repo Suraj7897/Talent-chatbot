@@ -1,4 +1,4 @@
-# app.py (Robust Upload/Link Toggle with Improved Streamlit Session Handling)
+# app.py (Improved Pie Chart + Smart Chart Detection + File Switching Fix)
 import streamlit as st
 import pandas as pd
 import io
@@ -39,7 +39,7 @@ def query_llama(prompt):
         response = client.chat.completions.create(
             model="llama3-8b-8192",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant. Use NLP to understand the user's intent and give specific, concise answers only."},
+                {"role": "system", "content": "You are a helpful assistant. Use NLP to understand the user's intent and give specific, clear answers with optional visualizations. Format your response in markdown. Include a pie or bar chart if asked. Only return natural language summaries, never return Python code."},
                 {"role": "user", "content": prompt},
             ]
         )
@@ -81,9 +81,8 @@ with st.sidebar:
         if uploaded_file:
             st.session_state.file_link_input = ""
     else:
-        file_link_input_value = st.text_input("📌 Paste Google Drive / Dropbox / OneDrive / Sheets link")
+        file_link_input_value = st.text_input("📌 Paste Google Drive / Dropbox / OneDrive / Sheets link", key="file_link_input")
         if file_link_input_value:
-            st.session_state.file_link_input = file_link_input_value
             uploaded_file = None
 
 CHAT_LOG_FILE = "chat_log.txt"
@@ -131,8 +130,10 @@ file_data, content_type = None, None
 if uploaded_file:
     file_data = uploaded_file
     content_type = mimetypes.guess_type(uploaded_file.name)[0]
+    st.session_state.file_link_input = ""
 elif st.session_state.file_link_input:
     file_data, content_type = load_file_from_link(st.session_state.file_link_input)
+    uploaded_file = None
 
 if file_data:
     filename = uploaded_file.name.lower() if uploaded_file else "temp.xlsx"
@@ -189,7 +190,11 @@ Here is a preview of the data:
 Now answer this:
 {user_query.strip()}
 
-If the query involves visualizing a distribution or counts (e.g., pie chart, bar chart), detect the relevant column and generate a matplotlib chart inline using Streamlit. Otherwise, respond clearly.
+Please:
+- Give a helpful summary in markdown
+- If the question is about quantity or grouping, create a pie or bar chart using Streamlit
+- Conclude with 2–3 follow-up questions the user can ask next
+Only return natural language answers — never include Python code in your response.
 """
             response = query_llama(prompt)
             st.session_state.chat_history.append((user_query, response))
@@ -203,15 +208,19 @@ If the query involves visualizing a distribution or counts (e.g., pie chart, bar
 </div>
 """, unsafe_allow_html=True)
 
-            # Try generating pie chart based on column match
-            if "pie chart" in user_query.lower():
-                matched_cols = [col for col in df.columns if any(word in col for word in ["type", "status", "department", "category"])]
+            if any(chart in user_query.lower() for chart in ["pie chart", "bar chart"]):
+                matched_cols = [col for col in df.columns if df[col].nunique() < 20 and df[col].dtype == "object"]
                 if matched_cols:
                     col = matched_cols[0]
-                    pie_data = df[col].value_counts()
+                    chart_data = df[col].value_counts()
                     fig, ax = plt.subplots()
-                    ax.pie(pie_data, labels=pie_data.index, autopct='%1.1f%%', startangle=90)
-                    ax.axis('equal')
+                    if "pie" in user_query.lower():
+                        ax.pie(chart_data, labels=chart_data.index, autopct='%1.1f%%', startangle=90)
+                        ax.axis('equal')
+                    elif "bar" in user_query.lower():
+                        chart_data.plot(kind='bar', ax=ax)
+                        ax.set_ylabel("Count")
+                        ax.set_xlabel(col.title())
                     st.pyplot(fig)
 
         except Exception as e:
@@ -240,6 +249,8 @@ Now answer this:
 Please:
 - Give a clear and concise answer
 - Use markdown if needed
+- Suggest 2–3 follow-up questions the user can explore next
+Only return natural language answers — never include Python code in your response.
 """
             response = query_llama(prompt)
             st.session_state.chat_history.append((user_query, response))
