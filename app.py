@@ -1,4 +1,4 @@
-# app.py (Improved chart detection for any keyword)
+# app.py (Enhanced: Support file link input via Google Drive, OneDrive, Dropbox, Google Sheets)
 import streamlit as st
 import pandas as pd
 import io
@@ -8,6 +8,7 @@ import docx
 import re
 import datetime
 import requests
+import mimetypes
 import matplotlib.pyplot as plt
 from database import save_to_db, load_from_db, db_table_exists
 from dotenv import load_dotenv
@@ -32,7 +33,7 @@ def query_llama(prompt):
         response = client.chat.completions.create(
             model="llama3-8b-8192",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "system", "content": "You are a helpful assistant. Use NLP to understand the user's intent and give specific, concise answers only."},
                 {"role": "user", "content": prompt},
             ]
         )
@@ -58,13 +59,14 @@ st.markdown("""
 st.markdown("""
 <div class='welcome-banner'>
     <h1>🧠 Talent Intelligence Hub (AI-Powered)</h1>
-    <p>Upload your document and ask anything — powered by LLaMA3 via Groq</p>
+    <p>Upload your document or paste a link and ask anything — powered by LLaMA3 via Groq</p>
 </div>
 """, unsafe_allow_html=True)
 
 with st.sidebar:
-    st.header("📂 Upload Talent File")
+    st.header("📂 Upload or Link Talent File")
     uploaded_file = st.file_uploader("Upload Excel/CSV/PDF/DOCX", type=["xlsx", "xls", "csv", "pdf", "docx"])
+    file_link = st.text_input("📌 Or paste Google Drive / Dropbox / OneDrive / Sheets link")
 
 CHAT_LOG_FILE = "chat_log.txt"
 def save_chat(query, response):
@@ -78,21 +80,62 @@ def show_chat_history():
             with open(CHAT_LOG_FILE, "r", encoding="utf-8") as log:
                 st.text_area("Chat Log", value=log.read(), height=300)
 
+def load_file_from_link(link):
+    try:
+        if "drive.google.com" in link:
+            file_id = re.search(r"/d/([\w-]+)|id=([\w-]+)", link)
+            file_id = file_id.group(1) if file_id.group(1) else file_id.group(2)
+            download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+        elif "dropbox.com" in link:
+            download_url = link.replace("www.dropbox.com", "dl.dropboxusercontent.com")
+        elif "onedrive.live.com" in link:
+            download_url = link.replace("redir?resid=", "download.aspx?resid=").replace("&authkey=", "")
+        elif "docs.google.com/spreadsheets" in link:
+            sheet_id = re.search(r"/d/([\w-]+)", link).group(1)
+            download_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
+        else:
+            download_url = link
+
+        response = requests.get(download_url)
+        if response.status_code == 200:
+            response.content_type = response.headers.get("Content-Type", "")
+            return io.BytesIO(response.content), response.content_type
+    except Exception as e:
+        st.warning(f"⚠️ Could not fetch file: {e}")
+    return None, None
+
 raw_text = None
 full_text = ""
 df = None
-if uploaded_file:
-    filename = uploaded_file.name.lower()
-    if filename.endswith((".xlsx", ".xls")):
-        df = pd.read_excel(uploaded_file)
-    elif filename.endswith(".csv"):
-        df = pd.read_csv(uploaded_file)
-    elif filename.endswith(".pdf"):
-        doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-        full_text = "\n".join([page.get_text() for page in doc])
-    elif filename.endswith(".docx"):
-        doc = docx.Document(uploaded_file)
-        full_text = "\n".join([para.text for para in doc.paragraphs])
+
+if uploaded_file or file_link:
+    file_data, content_type = (uploaded_file, None) if uploaded_file else load_file_from_link(file_link)
+    if file_data:
+        if uploaded_file:
+            filename = uploaded_file.name.lower()
+        else:
+            # Infer file type from content-type
+            if "sheet" in content_type:
+                filename = "temp.xlsx"
+            elif "csv" in content_type:
+                filename = "temp.csv"
+            elif "pdf" in content_type:
+                filename = "temp.pdf"
+            elif "word" in content_type:
+                filename = "temp.docx"
+            else:
+                filename = "temp.xlsx"
+
+        if filename.endswith((".xlsx", ".xls")):
+            df = pd.read_excel(file_data)
+        elif filename.endswith(".csv"):
+            df = pd.read_csv(file_data)
+        elif filename.endswith(".pdf"):
+            doc = fitz.open(stream=file_data.read(), filetype="pdf")
+            full_text = "\n".join([page.get_text() for page in doc])
+        elif filename.endswith(".docx"):
+            doc = docx.Document(file_data)
+            full_text = "\n".join([para.text for para in doc.paragraphs])
 
     if df is not None:
         df.columns = df.columns.str.strip().str.lower()
@@ -116,7 +159,7 @@ if df is not None:
     st.dataframe(df, use_container_width=True)
 
     st.subheader("💬 Ask AI about the data")
-    user_query = st.text_input("Ask a question like 'How many completed SEER training?'", key="user_query_input")
+    user_query = st.text_input("Ask me any question regarding your file", key="user_query_input")
 
     if user_query:
         try:
@@ -153,13 +196,10 @@ Please:
 
             chart_keywords = ["chart", "graph", "distribution", "pie", "bar"]
             if any(word in lowered_query for word in chart_keywords):
-                smart_targets = ["type", "status", "department", "category"]
+                smart_targets = ["status", "type", "category", "department"]
                 for col in df.columns:
-                    for key in smart_targets:
-                        if key in col.lower():
-                            matched_column = col
-                            break
-                    if matched_column:
+                    if any(key in col.lower() for key in smart_targets):
+                        matched_column = col
                         break
                 if not matched_column:
                     for col in df.columns:
@@ -202,4 +242,4 @@ elif full_text:
     st.subheader("📄 Uploaded Document Preview")
     st.text_area("Extracted Text from File", full_text[:3000])
 else:
-    st.info("🗕 Upload an Excel, PDF, or DOCX file to start asking questions.")
+    st.info("🗕 Upload an Excel, PDF, or DOCX file or paste a Drive link to start asking questions.")
