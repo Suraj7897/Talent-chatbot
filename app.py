@@ -1,4 +1,4 @@
-# app.py (Enhanced: Support file link input via Google Drive, OneDrive, Dropbox, Google Sheets)
+# app.py (Robust Upload/Link Toggle with Improved Streamlit Session Handling)
 import streamlit as st
 import pandas as pd
 import io
@@ -26,10 +26,10 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "last_file_type" not in st.session_state:
     st.session_state.last_file_type = None
+if "file_source" not in st.session_state:
+    st.session_state.file_source = "Upload File"
 if "file_link_input" not in st.session_state:
     st.session_state.file_link_input = ""
-if "clear_file_link" not in st.session_state:
-    st.session_state.clear_file_link = False
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 client = Groq(api_key=GROQ_API_KEY)
@@ -70,21 +70,21 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 with st.sidebar:
-    st.header("📂 Upload or Link Talent File")
+    st.header("📂 Choose File Source")
+    file_source = st.radio("Select Source", ["Upload File", "Paste Link"], index=0)
 
-    uploaded_file = st.file_uploader("Upload Excel/CSV/PDF/DOCX", type=["xlsx", "xls", "csv", "pdf", "docx"], key="file_upload")
+    uploaded_file = None
+    file_link_input_value = ""
 
-    if uploaded_file:
-        st.session_state.clear_file_link = True
-        st.session_state.last_file_type = "upload"
-
-    file_link_value = "" if st.session_state.clear_file_link else st.session_state.get("file_link_input", "")
-    file_link_input = st.text_input("📌 Or paste Google Drive / Dropbox / OneDrive / Sheets link", value=file_link_value, key="file_link_input")
-
-    if file_link_input and st.session_state.last_file_type != "link":
-        uploaded_file = None
-        st.session_state.last_file_type = "link"
-        st.session_state.clear_file_link = False
+    if file_source == "Upload File":
+        uploaded_file = st.file_uploader("Upload Excel/CSV/PDF/DOCX", type=["xlsx", "xls", "csv", "pdf", "docx"])
+        if uploaded_file:
+            st.session_state.file_link_input = ""
+    else:
+        file_link_input_value = st.text_input("📌 Paste Google Drive / Dropbox / OneDrive / Sheets link")
+        if file_link_input_value:
+            st.session_state.file_link_input = file_link_input_value
+            uploaded_file = None
 
 CHAT_LOG_FILE = "chat_log.txt"
 def save_chat(query, response):
@@ -126,47 +126,46 @@ raw_text = None
 full_text = ""
 df = None
 
-if uploaded_file or file_link_input:
-    file_data, content_type = (uploaded_file, None) if uploaded_file else load_file_from_link(file_link_input)
-    if file_data:
-        if uploaded_file:
-            filename = uploaded_file.name.lower()
-        else:
-            if "sheet" in content_type:
-                filename = "temp.xlsx"
-            elif "csv" in content_type:
-                filename = "temp.csv"
-            elif "pdf" in content_type:
-                filename = "temp.pdf"
-            elif "word" in content_type:
-                filename = "temp.docx"
-            else:
-                filename = "temp.xlsx"
+file_data, content_type = None, None
 
-        if filename.endswith((".xlsx", ".xls")):
-            df = pd.read_excel(file_data)
-        elif filename.endswith(".csv"):
-            df = pd.read_csv(file_data)
-        elif filename.endswith(".pdf"):
-            doc = fitz.open(stream=file_data.read(), filetype="pdf")
-            full_text = "\n".join([page.get_text() for page in doc])
-        elif filename.endswith(".docx"):
-            doc = docx.Document(file_data)
-            full_text = "\n".join([para.text for para in doc.paragraphs])
+if uploaded_file:
+    file_data = uploaded_file
+    content_type = mimetypes.guess_type(uploaded_file.name)[0]
+elif st.session_state.file_link_input:
+    file_data, content_type = load_file_from_link(st.session_state.file_link_input)
 
-    if df is not None:
-        df.columns = df.columns.str.strip().str.lower()
-        save_to_db(df)
-        st.session_state.df = df
-        st.session_state.text = ""
-        st.session_state.chat_history = []
-    else:
-        st.session_state.df = None
-        st.session_state.text = full_text
-        st.session_state.chat_history = []
+if file_data:
+    filename = uploaded_file.name.lower() if uploaded_file else "temp.xlsx"
+    if content_type and "sheet" in content_type:
+        filename = "temp.xlsx"
+    elif content_type and "csv" in content_type:
+        filename = "temp.csv"
+    elif content_type and "pdf" in content_type:
+        filename = "temp.pdf"
+    elif content_type and "word" in content_type:
+        filename = "temp.docx"
+
+    if filename.endswith((".xlsx", ".xls")):
+        df = pd.read_excel(file_data)
+    elif filename.endswith(".csv"):
+        df = pd.read_csv(file_data)
+    elif filename.endswith(".pdf"):
+        doc = fitz.open(stream=file_data.read(), filetype="pdf")
+        full_text = "\n".join([page.get_text() for page in doc])
+    elif filename.endswith(".docx"):
+        doc = docx.Document(file_data)
+        full_text = "\n".join([para.text for para in doc.paragraphs])
+
+if df is not None:
+    df.columns = df.columns.str.strip().str.lower()
+    save_to_db(df)
+    st.session_state.df = df
+    st.session_state.text = ""
+    st.session_state.chat_history = []
 else:
     st.session_state.df = None
-    st.session_state.text = ""
+    st.session_state.text = full_text
+    st.session_state.chat_history = []
 
 df = st.session_state.df
 full_text = st.session_state.text
@@ -176,7 +175,7 @@ if df is not None:
     st.dataframe(df, use_container_width=True)
 
     st.subheader("💬 Ask AI about the data")
-    user_query = st.text_input("Ask me any question regarding your file", key="user_query_input")
+    user_query = st.text_input("Ask me any question regarding your file")
 
     if user_query:
         try:
@@ -190,7 +189,7 @@ Here is a preview of the data:
 Now answer this:
 {user_query.strip()}
 
-Respond clearly. Use charts or tables if helpful.
+If the query involves visualizing a distribution or counts (e.g., pie chart, bar chart), detect the relevant column and generate a matplotlib chart inline using Streamlit. Otherwise, respond clearly.
 """
             response = query_llama(prompt)
             st.session_state.chat_history.append((user_query, response))
@@ -198,11 +197,23 @@ Respond clearly. Use charts or tables if helpful.
 
             st.markdown(f"""
 <div class='chat-box'>
-<strong>🧑‍🏫 You:</strong> {user_query}
+<strong>🧑‍🏬 You:</strong> {user_query}
 
 **🧠 AI:** {response}
 </div>
 """, unsafe_allow_html=True)
+
+            # Try generating pie chart based on column match
+            if "pie chart" in user_query.lower():
+                matched_cols = [col for col in df.columns if any(word in col for word in ["type", "status", "department", "category"])]
+                if matched_cols:
+                    col = matched_cols[0]
+                    pie_data = df[col].value_counts()
+                    fig, ax = plt.subplots()
+                    ax.pie(pie_data, labels=pie_data.index, autopct='%1.1f%%', startangle=90)
+                    ax.axis('equal')
+                    st.pyplot(fig)
+
         except Exception as e:
             st.warning(f"⚠️ Failed to answer: {e}")
 
@@ -213,7 +224,7 @@ elif full_text:
     st.text_area("Extracted Text from File", full_text[:3000], height=300)
 
     st.subheader("💬 Ask AI about the document")
-    user_query = st.text_input("Ask me any question regarding your file", key="doc_query_input")
+    user_query = st.text_input("Ask me any question regarding your file")
 
     if user_query:
         try:
@@ -236,15 +247,16 @@ Please:
 
             st.markdown(f"""
 <div class='chat-box'>
-<strong>🧑‍🏫 You:</strong> {user_query}
+<strong>🧑‍🏬 You:</strong> {user_query}
 
 **🧠 AI:** {response}
 </div>
 """, unsafe_allow_html=True)
+
         except Exception as e:
             st.warning(f"⚠️ Failed to answer: {e}")
 
     show_chat_history()
 
 else:
-    st.info("🗕️ Upload an Excel, PDF, or DOCX file or paste a Drive link to start asking questions.")
+    st.info("🗕 Upload an Excel, PDF, or DOCX file or paste a Drive link to start asking questions.")
