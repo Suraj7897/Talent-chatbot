@@ -24,6 +24,12 @@ if "text" not in st.session_state:
     st.session_state.text = ""
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
+if "last_file_type" not in st.session_state:
+    st.session_state.last_file_type = None
+if "file_link_input" not in st.session_state:
+    st.session_state.file_link_input = ""
+if "clear_file_link" not in st.session_state:
+    st.session_state.clear_file_link = False
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 client = Groq(api_key=GROQ_API_KEY)
@@ -65,8 +71,20 @@ st.markdown("""
 
 with st.sidebar:
     st.header("📂 Upload or Link Talent File")
-    uploaded_file = st.file_uploader("Upload Excel/CSV/PDF/DOCX", type=["xlsx", "xls", "csv", "pdf", "docx"])
-    file_link = st.text_input("📌 Or paste Google Drive / Dropbox / OneDrive / Sheets link")
+
+    uploaded_file = st.file_uploader("Upload Excel/CSV/PDF/DOCX", type=["xlsx", "xls", "csv", "pdf", "docx"], key="file_upload")
+
+    if uploaded_file:
+        st.session_state.clear_file_link = True
+        st.session_state.last_file_type = "upload"
+
+    file_link_value = "" if st.session_state.clear_file_link else st.session_state.get("file_link_input", "")
+    file_link_input = st.text_input("📌 Or paste Google Drive / Dropbox / OneDrive / Sheets link", value=file_link_value, key="file_link_input")
+
+    if file_link_input and st.session_state.last_file_type != "link":
+        uploaded_file = None
+        st.session_state.last_file_type = "link"
+        st.session_state.clear_file_link = False
 
 CHAT_LOG_FILE = "chat_log.txt"
 def save_chat(query, response):
@@ -108,8 +126,8 @@ raw_text = None
 full_text = ""
 df = None
 
-if uploaded_file or file_link:
-    file_data, content_type = (uploaded_file, None) if uploaded_file else load_file_from_link(file_link)
+if uploaded_file or file_link_input:
+    file_data, content_type = (uploaded_file, None) if uploaded_file else load_file_from_link(file_link_input)
     if file_data:
         if uploaded_file:
             filename = uploaded_file.name.lower()
@@ -180,7 +198,7 @@ Respond clearly. Use charts or tables if helpful.
 
             st.markdown(f"""
 <div class='chat-box'>
-<strong>🧑‍🏬 You:</strong> {user_query}
+<strong>🧑‍🏫 You:</strong> {user_query}
 
 **🧠 AI:** {response}
 </div>
@@ -218,7 +236,7 @@ Please:
 
             st.markdown(f"""
 <div class='chat-box'>
-<strong>🧑‍🏬 You:</strong> {user_query}
+<strong>🧑‍🏫 You:</strong> {user_query}
 
 **🧠 AI:** {response}
 </div>
@@ -229,4 +247,4 @@ Please:
     show_chat_history()
 
 else:
-    st.info("🗕 Upload an Excel, PDF, or DOCX file or paste a Drive link to start asking questions.")
+    st.info("🗕️ Upload an Excel, PDF, or DOCX file or paste a Drive link to start asking questions.")
