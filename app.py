@@ -1,4 +1,4 @@
-# app.py (Improved Pie Chart + Smart Chart Detection + File Switching Fix)
+# app.py (Updated with Smarter Chart Detection from AI Response)
 import streamlit as st
 import pandas as pd
 import io
@@ -36,10 +36,27 @@ client = Groq(api_key=GROQ_API_KEY)
 
 def query_llama(prompt):
     try:
+        system_prompt = """
+You are an expert AI analyst with strong natural language skills.
+
+Your responsibilities:
+- Understand uploaded datasets or documents quickly
+- Provide clear, structured, and smart answers in markdown
+- Explain insights like a human data analyst would
+- Always be concise, friendly, and insightful
+- Never return code — only human-readable explanations
+
+If the user asks about charts:
+- Mention what's important in the data (top categories, trends, etc.)
+- Summarize chart findings in plain English
+
+If the user uploads a document:
+- Extract the key ideas, structure them logically, and answer clearly
+"""
         response = client.chat.completions.create(
             model="llama3-8b-8192",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant. Use NLP to understand the user's intent and give specific, clear answers with optional visualizations. Format your response in markdown. Include a pie or bar chart if asked. Only return natural language summaries, never return Python code."},
+                {"role": "system", "content": system_prompt.strip()},
                 {"role": "user", "content": prompt},
             ]
         )
@@ -180,9 +197,22 @@ if df is not None:
 
     if user_query:
         try:
-            snippet = df.to_markdown(index=False)[:18000]
+            numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
+            category_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+            context_hint = f"This dataset has numeric fields like {', '.join(numeric_cols)} and categorical fields like {', '.join(category_cols)}."
+
+            snippet = f"""
+**Column Names**: {', '.join(df.columns.tolist())}
+
+**Data Types**:
+{df.dtypes.to_dict()}
+
+**Sample Rows**:
+{df.head(3).to_markdown(index=False)}
+"""
+
             prompt = f"""
-You are a helpful assistant. A user has uploaded a dataset and asked a question.
+{context_hint}
 
 Here is a preview of the data:
 {snippet}
@@ -196,6 +226,7 @@ Please:
 - Conclude with 2–3 follow-up questions the user can ask next
 Only return natural language answers — never include Python code in your response.
 """
+
             response = query_llama(prompt)
             st.session_state.chat_history.append((user_query, response))
             save_chat(user_query, response)
@@ -208,16 +239,17 @@ Only return natural language answers — never include Python code in your respo
 </div>
 """, unsafe_allow_html=True)
 
-            if any(chart in user_query.lower() for chart in ["pie chart", "bar chart"]):
-                matched_cols = [col for col in df.columns if df[col].nunique() < 20 and df[col].dtype == "object"]
+            # Enhanced: Chart detection from AI response (not just user query)
+            if "bar chart" in response.lower() or "pie chart" in response.lower():
+                matched_cols = [col for col in df.columns if df[col].dtype == "object" and df[col].nunique() < 20]
                 if matched_cols:
                     col = matched_cols[0]
                     chart_data = df[col].value_counts()
                     fig, ax = plt.subplots()
-                    if "pie" in user_query.lower():
+                    if "pie" in response.lower():
                         ax.pie(chart_data, labels=chart_data.index, autopct='%1.1f%%', startangle=90)
                         ax.axis('equal')
-                    elif "bar" in user_query.lower():
+                    else:
                         chart_data.plot(kind='bar', ax=ax)
                         ax.set_ylabel("Count")
                         ax.set_xlabel(col.title())
