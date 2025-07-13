@@ -1,4 +1,4 @@
-# app.py (Improved with Smart Column Inference for Charting)
+# app.py (Improved with Full Data Awareness)
 import streamlit as st
 import pandas as pd
 import io
@@ -191,22 +191,28 @@ if st.session_state.df is not None:
         try:
             stats_preview = df.describe(include='all').to_string()
             preview = df.head(10).to_markdown(index=False)
+            full_cols = ", ".join(df.columns.tolist())
+            total_rows = len(df)
+
             prompt = f"""
-Here is a preview of the data:
+You are analyzing a dataset with {total_rows} rows and the following columns: {full_cols}.
+
+Here is a preview of the first 10 rows:
 {preview}
 
-Some statistics:
+Descriptive statistics:
 {stats_preview}
 
-Now answer this:
+Now answer this user query:
 {user_query.strip()}
 
 Please:
-- Give a helpful summary in markdown
-- If the question is about quantity or grouping, mention if a pie/bar chart would help
-- Conclude with 2–3 follow-up questions
-Do not return Python code.
+- Consider the full dataset even though preview only shows 10 rows.
+- Mention any relevant insights from the whole data.
+- If useful, suggest pie/bar charts.
+- Do not return Python code.
 """
+
             response = query_llama(prompt)
             st.session_state.chat_history.append((user_query, response))
             save_chat(user_query, response)
