@@ -1,4 +1,4 @@
-# app.py (Updated with Smarter Chart Detection from AI Response)
+# app.py (Improved with Smart Column Inference for Charting)
 import streamlit as st
 import pandas as pd
 import io
@@ -10,6 +10,7 @@ import datetime
 import requests
 import mimetypes
 import matplotlib.pyplot as plt
+from difflib import get_close_matches
 from database import save_to_db, load_from_db, db_table_exists
 from dotenv import load_dotenv
 from groq import Groq
@@ -18,40 +19,41 @@ load_dotenv()
 
 st.set_page_config(page_title="🧠 Talent Intelligence Hub (AI)", page_icon="🧠", layout="wide")
 
-if "df" not in st.session_state:
-    st.session_state.df = None
-if "text" not in st.session_state:
-    st.session_state.text = ""
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-if "last_file_type" not in st.session_state:
-    st.session_state.last_file_type = None
-if "file_source" not in st.session_state:
-    st.session_state.file_source = "Upload File"
-if "file_link_input" not in st.session_state:
-    st.session_state.file_link_input = ""
+# Session state
+for key, default in {
+    "df": None,
+    "text": "",
+    "chat_history": [],
+    "last_file_type": None,
+    "file_source": "Upload File",
+    "file_link_input": "",
+}.items():
+    if key not in st.session_state:
+        st.session_state[key] = default
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 client = Groq(api_key=GROQ_API_KEY)
+
+# Column inference
+def infer_column(query, columns):
+    words = re.findall(r'\w+', query.lower())
+    best_match = get_close_matches(' '.join(words), columns, n=1, cutoff=0.3)
+    if best_match:
+        return best_match[0]
+    for word in words:
+        best_match = get_close_matches(word, columns, n=1, cutoff=0.6)
+        if best_match:
+            return best_match[0]
+    return None
 
 def query_llama(prompt):
     try:
         system_prompt = """
 You are an expert AI analyst with strong natural language skills.
-
-Your responsibilities:
 - Understand uploaded datasets or documents quickly
 - Provide clear, structured, and smart answers in markdown
 - Explain insights like a human data analyst would
-- Always be concise, friendly, and insightful
 - Never return code — only human-readable explanations
-
-If the user asks about charts:
-- Mention what's important in the data (top categories, trends, etc.)
-- Summarize chart findings in plain English
-
-If the user uploads a document:
-- Extract the key ideas, structure them logically, and answer clearly
 """
         response = client.chat.completions.create(
             model="llama3-8b-8192",
@@ -132,18 +134,12 @@ def load_file_from_link(link):
 
         response = requests.get(download_url)
         if response.status_code == 200:
-            response.content_type = response.headers.get("Content-Type", "")
-            return io.BytesIO(response.content), response.content_type
+            return io.BytesIO(response.content), response.headers.get("Content-Type", "")
     except Exception as e:
         st.warning(f"⚠️ Could not fetch file: {e}")
     return None, None
 
-raw_text = None
-full_text = ""
-df = None
-
 file_data, content_type = None, None
-
 if uploaded_file:
     file_data = uploaded_file
     content_type = mimetypes.guess_type(uploaded_file.name)[0]
@@ -174,21 +170,17 @@ if file_data:
         doc = docx.Document(file_data)
         full_text = "\n".join([para.text for para in doc.paragraphs])
 
-if df is not None:
-    df.columns = df.columns.str.strip().str.lower()
-    save_to_db(df)
-    st.session_state.df = df
-    st.session_state.text = ""
-    st.session_state.chat_history = []
-else:
-    st.session_state.df = None
-    st.session_state.text = full_text
-    st.session_state.chat_history = []
+    if df is not None:
+        df.columns = df.columns.str.strip().str.lower()
+        save_to_db(df)
+        st.session_state.df = df
+        st.session_state.text = ""
+    else:
+        st.session_state.text = full_text
 
-df = st.session_state.df
-full_text = st.session_state.text
-
-if df is not None:
+# Chat logic
+if st.session_state.df is not None:
+    df = st.session_state.df
     st.subheader("📊 Uploaded Talent Data")
     st.dataframe(df, use_container_width=True)
 
@@ -197,72 +189,62 @@ if df is not None:
 
     if user_query:
         try:
-            numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
-            category_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
-            context_hint = f"This dataset has numeric fields like {', '.join(numeric_cols)} and categorical fields like {', '.join(category_cols)}."
-
-            snippet = f"""
-**Column Names**: {', '.join(df.columns.tolist())}
-
-**Data Types**:
-{df.dtypes.to_dict()}
-
-**Sample Rows**:
-{df.head(3).to_markdown(index=False)}
-"""
-
+            stats_preview = df.describe(include='all').to_string()
+            preview = df.head(10).to_markdown(index=False)
             prompt = f"""
-{context_hint}
-
 Here is a preview of the data:
-{snippet}
+{preview}
+
+Some statistics:
+{stats_preview}
 
 Now answer this:
 {user_query.strip()}
 
 Please:
 - Give a helpful summary in markdown
-- If the question is about quantity or grouping, create a pie or bar chart using Streamlit
-- Conclude with 2–3 follow-up questions the user can ask next
-Only return natural language answers — never include Python code in your response.
+- If the question is about quantity or grouping, mention if a pie/bar chart would help
+- Conclude with 2–3 follow-up questions
+Do not return Python code.
 """
-
             response = query_llama(prompt)
             st.session_state.chat_history.append((user_query, response))
             save_chat(user_query, response)
 
             st.markdown(f"""
 <div class='chat-box'>
-<strong>🧑‍🏬 You:</strong> {user_query}
+<strong>🧑‍🏫 You:</strong> {user_query}
 
 **🧠 AI:** {response}
 </div>
 """, unsafe_allow_html=True)
 
-            # Enhanced: Chart detection from AI response (not just user query)
-            if "bar chart" in response.lower() or "pie chart" in response.lower():
-                matched_cols = [col for col in df.columns if df[col].dtype == "object" and df[col].nunique() < 20]
-                if matched_cols:
-                    col = matched_cols[0]
-                    chart_data = df[col].value_counts()
+            if any(x in user_query.lower() for x in ["chart", "distribution", "pie", "bar", "graph"]):
+                inferred_col = infer_column(user_query, df.columns.tolist())
+                if inferred_col:
+                    chart_data = df[inferred_col].value_counts()
                     fig, ax = plt.subplots()
-                    if "pie" in response.lower():
+                    if "pie" in user_query.lower():
                         ax.pie(chart_data, labels=chart_data.index, autopct='%1.1f%%', startangle=90)
-                        ax.axis('equal')
-                    else:
+                        ax.axis("equal")
+                        ax.set_title(f"{inferred_col.title()} Distribution")
+                    elif "bar" in user_query.lower():
                         chart_data.plot(kind='bar', ax=ax)
+                        ax.set_title(f"{inferred_col.title()} Count")
                         ax.set_ylabel("Count")
-                        ax.set_xlabel(col.title())
+                        ax.set_xlabel(inferred_col.title())
                     st.pyplot(fig)
+                else:
+                    st.info("ℹ️ Couldn't infer which column to chart. Try mentioning a clearer field like 'Department' or 'Status'.")
 
         except Exception as e:
             st.warning(f"⚠️ Failed to answer: {e}")
 
     show_chat_history()
 
-elif full_text:
+elif st.session_state.text:
     st.subheader("📄 Uploaded Document Preview")
-    st.text_area("Extracted Text from File", full_text[:3000], height=300)
+    st.text_area("Extracted Text from File", st.session_state.text[:3000], height=300)
 
     st.subheader("💬 Ask AI about the document")
     user_query = st.text_input("Ask me any question regarding your file")
@@ -270,19 +252,13 @@ elif full_text:
     if user_query:
         try:
             prompt = f"""
-You are a helpful assistant. A user uploaded a document and asked a question.
-
 Document snippet:
-{full_text[:18000]}
+{st.session_state.text[:18000]}
 
 Now answer this:
 {user_query.strip()}
 
-Please:
-- Give a clear and concise answer
-- Use markdown if needed
-- Suggest 2–3 follow-up questions the user can explore next
-Only return natural language answers — never include Python code in your response.
+Give a clear and concise answer using markdown, suggest 2–3 follow-up questions, and do not return code.
 """
             response = query_llama(prompt)
             st.session_state.chat_history.append((user_query, response))
@@ -290,7 +266,7 @@ Only return natural language answers — never include Python code in your respo
 
             st.markdown(f"""
 <div class='chat-box'>
-<strong>🧑‍🏬 You:</strong> {user_query}
+<strong>🧑‍🏫 You:</strong> {user_query}
 
 **🧠 AI:** {response}
 </div>
